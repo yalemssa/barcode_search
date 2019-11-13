@@ -54,7 +54,7 @@ def write_output(data, enum_value):
 
 def main():
 	#do a get config here??
-	api_url, headers = u.login(url="https://archivesspace.library.yale.edu/api", username="amd243", password="FFmIjc5xLw")
+	api_url, headers = u.login()
 	#want to be able to do this more than once - ORRR just have this as a command line argument like the dupe detect
 	if len(sys.argv) > 1:
 		barcodes = sys.argv[1:]

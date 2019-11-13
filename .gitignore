@@ -20,3 +20,6 @@
 
 #other
 *.README.md.html
+
+#barcode file
+test_barcodes_full.csv

@@ -1,33 +1,40 @@
 #/usr/bin/python3
 #~/anaconda3/bin/python
 
-import requests
+'''This module takes a list of barcodes as input. It searches ArchivesSpace and
+ Voyager for those barcodes and returns collection information. This application
+  is used for Yale MSSA's LSF transfer process.'''
+
 import csv
 import json
 import logging
-import time
-import subprocess
-import os
 import sys
+import os
+from time import time, sleep
+from subprocess import call as sc_call
+import requests
 from tqdm import tqdm
 
 #TODO: Implement asyncio, add config file
 
 
 def keeptime(start):
-    elapsedtime = time.time() - start
-    m, s = divmod(elapsedtime, 60)
-    h, m = divmod(m, 60)
-    logging.debug('Total time elapsed: ' + '%d:%02d:%02d' % (h, m, s) + '\n')
+    '''Tracks time it takes functio to run and records in output log'''
+    elapsedtime = time() - start
+    minutes, seconds = divmod(elapsedtime, 60)
+    hours, minutes = divmod(minutes, 60)
+    logging.debug('%d:%02d:%02d' % (hours, minutes, seconds))
 
 def open_outfile(filepath):
+    '''Opens the log file and output file after the function finishes'''
     if sys.platform == "win32":
         os.startfile(filepath)
     else:
         opener = "open" if sys.platform == "darwin" else "xdg-open"
-        subprocess.call([opener, filepath])
+        sc_call([opener, filepath])
 
 def error_log():
+    '''Creates a basic logger for this program'''
     if sys.platform == "win32":
         logger = '\\Windows\\Temp\\error_log.log'
     else:
@@ -37,6 +44,7 @@ def error_log():
     return logger
 
 def login():
+    '''Logs in to the ArchivesSpace API'''
     try:
         url = input('Please enter the ArchivesSpace API URL: ')
         username = input('Please enter your username: ')
@@ -45,25 +53,25 @@ def login():
         #if session object is returned then login was successful; if not it failed.
         if 'session' in auth:
             session = auth["session"]
-            h = {'X-ArchivesSpace-Session':session, 'Content_Type': 'application/json'}
+            headers = {'X-ArchivesSpace-Session':session, 'Content_Type': 'application/json'}
             print('\nLogin successful!\n')
             logging.debug('Success!')
-            return (url, h)
         else:
             print('\nLogin failed! Check credentials and try again\n')
             logging.debug('Login failed')
             logging.debug(auth.get('error'))
-            u, heads = login()
-            return u, heads
-    except:
+            url, headers = login()
+        return url, headers
+    except Exception:
         print('\nLogin failed! Check credentials and try again!\n')
         logging.exception('Error: ')
-        u, heads = login()
-        return u, heads
+        url_recurse, headers_recurse = login()
+        return url_recurse, headers_recurse
 
 #Open a CSV in reader mode
 #CHANGE THIS TO JUST BE A LIST...
 def opencsv():
+    '''Opens a CSV input file as a list'''
     try:
         input_csv = input('Please enter path to CSV: ')
         file = open(input_csv, 'r', encoding='utf-8')
@@ -71,66 +79,71 @@ def opencsv():
         #small and need the length for the tqdm counter
         csvlist = [[barcode.strip()] for barcode in file.readlines() if 'barcode' not in barcode]
         return (input_csv, csvlist)
-    except:
+    except Exception:
         logging.exception('Error: ')
         logging.debug('Trying again...')
         print('\nCSV not found. Please try again.\n')
-        i, c = opencsv()
-        return (i, c)
+        input_csv_recurse, csvlist_recurse = opencsv()
+        return (input_csv_recurse, csvlist_recurse)
 
-#Open a CSV file in writer mode
 def opencsvout(infilename):
+    '''Opens a CSV outfile in writer mode'''
     try:
         output_csv = infilename[:-4] + '_outfile.csv'
         fileob = open(output_csv, 'a', encoding='utf-8', newline='')
         csvout = csv.writer(fileob)
         return (output_csv, fileob, csvout)
-    except:
+    except Exception:
         logging.exception('Error: ')
         print('\nError creating outfile. Please try again.\n')
-        i, f, c = opencsvout()
-        return (i, f, c)
+        infile_recurse, fileob_recurse, csvout_recurse = opencsvout(infilename)
+        return (infile_recurse, fileob_recurse, csvout_recurse)
 
 def search_voyager_helper(item_data, voyager_url, get_bib_item_ep, barcode):
+    '''Processes results from Voyager search, searches bib data endpoint
+    for title information.'''
     try:
         bib_id = item_data['bibid']
         call_number = item_data['callno']
         location = item_data['locname']
         if 'itemenum' in item_data:
-            #would want to split this eventually, assuing that 
+            #would want to split this eventually
             box_num = item_data['itemenum']
             series = 'see container_number field'
-            cp = 'see container_number field'
+            container_profile = 'see container_number field'
         else:
             box_num = 'no_box_number'
             series = 'no_series'
-            cp = 'no_container_profile'
+            container_profile = 'no_container_profile'
         #there should not be more than one result here, for sure...
         search_bib_item = requests.get(voyager_url + get_bib_item_ep + bib_id).json()
         #is this good? Any time this wouldn't work?
         title = search_bib_item['record'][0]['title']
-        return [barcode, series, call_number, box_num, title, cp, location]
+        return [barcode, series, call_number, box_num, title, container_profile, location]
     # do better
     except Exception:
         logging.exception('Error: ')
         #should this return something?
 
 def search_voyager(barcode, voyager_url, get_item_ep, get_bib_item_ep):
+    '''Searches Voyager for a barcode and retrieves item information.'''
     search_item = requests.get(voyager_url + get_item_ep + barcode).json()
     if search_item == {'items': [{'barcode': 'NA'}]}:
-        return [barcode, 'No results found in AS or Voyager']
+        result = [barcode, 'No results found in AS or Voyager']
     else:
-        #this assumes that there is only one result for the barcode - which should be the case, I think...
+        #this assumes that there is only one result for the barcode 
+        #- which should be the case, I think...
         if len(search_item['items']) == 1:
             item_data = search_item['items'][0]
-            return search_voyager_helper(item_data, voyager_url, get_bib_item_ep, barcode)
         else:
             for i, item in enumerate(search_item['items']):
                 if item['barcode'] == barcode:
                     item_data = search_item['items'][i]
-                    return search_voyager_helper(item_data, voyager_url, get_bib_item_ep, barcode)
+        result = search_voyager_helper(item_data, voyager_url, get_bib_item_ep, barcode)
+    return result
 
 def as_search_processing(barcode, search):
+    '''Processes search results from ArchivesSpace API'''
     #Searching identifier and title, which are both required fields
     identifier = search['response']['docs'][0]['collection_identifier_stored_u_sstr'][0]
     title = search['response']['docs'][0]['collection_display_string_u_sstr'][0]
@@ -158,15 +171,17 @@ def as_search_processing(barcode, search):
     return [barcode, series, identifier, container_number, title, container_profile, location_title]
 
 def search_barcodes(csvfile, csvoutfile, api_url, headers, voyager_url, get_item_ep, get_bib_item_ep):
-    for row in tqdm(csvfile):
+    '''Loops through CSV list and searches ArchivesSpace. If record not
+    found in ArchivesSpace the function will search Voyager'''
+    for row in tqdm(csvfile, ncols=75):
         barcode = row[0]
         try:
-            logging.debug('Searching ' + barcode)
+            logging.debug(barcode)
             search = requests.get(api_url + '/repositories/12/top_containers/search?q=barcode_u_sstr:' +  barcode, headers=headers).json()
             if search['response']['numFound'] != 0:
                 newrow = as_search_processing(barcode, search)
                 csvoutfile.writerow(newrow)
-            #elif here, or is this ok? Don't want to 
+            #elif here, or is this ok? Don't want to
             else:
                 voyager_results = search_voyager(barcode, voyager_url, get_item_ep, get_bib_item_ep)
                 csvoutfile.writerow(voyager_results)
@@ -180,6 +195,7 @@ def search_barcodes(csvfile, csvoutfile, api_url, headers, voyager_url, get_item
     #print("\n\nCredit: program icon was made by http://www.freepik.com on https://www.flaticon.com/ and is licensed by Creative Commons BY 3.0 (CC 3.0 BY")
 
 def main():
+    '''Main function'''
     print('''\n\n
              #################################################
              #################################################
@@ -190,11 +206,11 @@ def main():
              #################################################
              #################################################
              \n\n''')
-    time.sleep(1)
+    sleep(1)
     print("                            Let's get started!\n\n")
-    time.sleep(1)
+    sleep(1)
     barcode_logfile = error_log()
-    starttime = time.time()
+    starttime = time()
     logging.debug('Connecting to ArchivesSpace API...')
     api_url, headers = login()
     #logging.debug('Opening barcode file...')
