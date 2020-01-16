@@ -23,3 +23,4 @@
 
 #barcode file
 test_barcodes_full.csv
+test_barcodes_full_outfile.csv

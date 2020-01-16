@@ -15,8 +15,7 @@ from subprocess import call as sc_call
 import requests
 from tqdm import tqdm
 
-#TODO: Implement asyncio, add config file
-
+#TODO: Implement asyncio, add config file; put in a class
 
 def keeptime(start):
     '''Tracks time it takes functio to run and records in output log'''
@@ -85,6 +84,20 @@ def opencsv():
         print('\nCSV not found. Please try again.\n')
         input_csv_recurse, csvlist_recurse = opencsv()
         return (input_csv_recurse, csvlist_recurse)
+
+def set_repository(api_url, headers):
+    '''Lets the user select their repository'''
+    try:
+        repo_data = requests.get(api_url + '/repositories').json()
+        repo_list = [[repo['name'], repo['uri'].replace('/repositories/', '')] for repo in repo_data]
+        print('\n')
+        for repo_name, repo_number in repo_list:
+            print(f'{repo_number}: {repo_name}')
+        print('\n')
+        repository_number = input('Please enter repository number from list above: ')
+        return repository_number
+    except Exception:
+        logging.exception('Error: ')
 
 def opencsvout(infilename):
     '''Opens a CSV outfile in writer mode'''
@@ -170,14 +183,15 @@ def as_search_processing(barcode, search):
         location_title = 'no_location'
     return [barcode, series, identifier, container_number, title, container_profile, location_title]
 
-def search_barcodes(csvfile, csvoutfile, api_url, headers, voyager_url, get_item_ep, get_bib_item_ep):
+def search_barcodes(csvfile, csvoutfile, api_url, headers, voyager_url, get_item_ep, get_bib_item_ep, repo_num):
     '''Loops through CSV list and searches ArchivesSpace. If record not
     found in ArchivesSpace the function will search Voyager'''
     for row in tqdm(csvfile, ncols=75):
         barcode = row[0]
         try:
             logging.debug(barcode)
-            search = requests.get(api_url + '/repositories/12/top_containers/search?q=barcode_u_sstr:' +  barcode, headers=headers).json()
+            #f strings please
+            search = requests.get(api_url + '/repositories/' + repo_num + '/top_containers/search?q=barcode_u_sstr:' +  barcode, headers=headers).json()
             if search['response']['numFound'] != 0:
                 newrow = as_search_processing(barcode, search)
                 csvoutfile.writerow(newrow)
@@ -216,14 +230,16 @@ def main():
     #logging.debug('Opening barcode file...')
     ininput_string, csvfile = opencsv()
     #logging.debug('Opening output file...')
+    repo_num = set_repository(api_url, headers)
     input_string, fileobject, csvoutfile = opencsvout(ininput_string)
     csv_headers = ['barcode', 'series', 'identifier', 'container_number', 'title', 'container_profile', 'location']
     csvoutfile.writerow(csv_headers)
+    #I think this should all be in a class fr
     voy_api_url = 'http://libapp.library.yale.edu/VoySearch/'
     get_item = 'GetItem?barcode='
     get_bib_item = 'GetBibItem?bibid='
     print('\nPlease wait a moment...\n')
-    search_barcodes(csvfile, csvoutfile, api_url, headers, voy_api_url, get_item, get_bib_item)
+    search_barcodes(csvfile, csvoutfile, api_url, headers, voy_api_url, get_item, get_bib_item, repo_num)
     fileobject.close()
     keeptime(starttime)
     logging.debug('All Done!')
